@@ -201,5 +201,5 @@ class Agent:
 
 
 def load_system_prompt(path=None):
-    path = Path(path or Path(__file__).resolve().parent.parent / "prompts" / "system_v2.md")
+    path = Path(path or Path(__file__).resolve().parent.parent / "prompts" / "system_v3.md")
     return path.read_text(encoding="utf-8")

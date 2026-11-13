@@ -14,3 +14,8 @@
   sent its answer as a call to a made-up "JSON" tool (rejected by Groq with HTTP 400).
 - Same day, tool fix (not a prompt change): search_scholarships now treats "All ..." fields of study
   as matching any field, and an empty result tells the model to remove a filter.
+
+## v3 (system_v3.md), 2026-11-13
+- Stronger language rule: answer in the language of the student's last message; English question ->
+  English answer. Reason: gpt-oss-20b answered English questions in Azerbaijani (3 of 3 tries).
+- This is the version used for the model evaluation.
