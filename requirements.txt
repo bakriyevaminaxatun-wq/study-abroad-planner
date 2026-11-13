@@ -1,0 +1,7 @@
+pytest
+python-dotenv
+openpyxl
+chromadb
+sentence-transformers
+streamlit
+openai

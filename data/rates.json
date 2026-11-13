@@ -1,0 +1,33 @@
+{
+  "date": "2026-11-12",
+  "rates": {
+    "USD": 1.7,
+    "EUR": 1.8832,
+    "GBP": 2.2541,
+    "TRY": 0.0338,
+    "JPY": 0.010641,
+    "KRW": 0.001279,
+    "HUF": 0.005162,
+    "SEK": 0.1703
+  },
+  "dates": {
+    "USD": "2026-11-12",
+    "EUR": "2026-11-12",
+    "GBP": "2026-11-12",
+    "TRY": "2026-11-12",
+    "JPY": "2026-11-12",
+    "KRW": "2026-11-12",
+    "HUF": "2026-11-12",
+    "SEK": "2026-11-12"
+  },
+  "sources": {
+    "USD": "CBAR https://www.cbar.az/currencies/12.11.2026.xml",
+    "EUR": "CBAR https://www.cbar.az/currencies/12.11.2026.xml",
+    "GBP": "CBAR https://www.cbar.az/currencies/12.11.2026.xml",
+    "TRY": "CBAR https://www.cbar.az/currencies/12.11.2026.xml",
+    "JPY": "CBAR https://www.cbar.az/currencies/12.11.2026.xml",
+    "KRW": "CBAR https://www.cbar.az/currencies/12.11.2026.xml",
+    "HUF": "CBAR https://www.cbar.az/currencies/12.11.2026.xml",
+    "SEK": "CBAR https://www.cbar.az/currencies/12.11.2026.xml"
+  }
+}

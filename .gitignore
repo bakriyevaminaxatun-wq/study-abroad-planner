@@ -1,0 +1,10 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+chroma_db/
+*.sqlite
+*.db
+logs/*.json*
+!logs/.gitkeep
+.pytest_cache/
