@@ -1,9 +1,18 @@
 import os
+import pytest
 from pathlib import Path
 from streamlit.testing.v1 import AppTest
 from tests.conftest import TODAY
 
 APP = str(Path(__file__).resolve().parent.parent / "app" / "streamlit_app.py")
+
+
+@pytest.fixture(autouse=True)
+def no_real_models(monkeypatch):
+    """App tests always use the demo model: no API calls, no quota used, whatever is in .env.
+    Empty values win because load_dotenv never overwrites variables that are already set."""
+    for key in ("GEMINI_API_KEY", "GROQ_API_KEY"):
+        monkeypatch.setenv(key, "")
 
 
 def test_app_runs_and_answers(env, monkeypatch):

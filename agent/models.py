@@ -54,6 +54,13 @@ class DemoModel:
                      caveats=["This answer is scripted. Connect a real model to get real answers."])
 
 
+class ModelAPIError(RuntimeError):
+    """API error: short text for the screen, full text kept for parsing."""
+    def __init__(self, full_text):
+        super().__init__(full_text[:800].strip())
+        self.full_text = full_text
+
+
 class OpenAICompatModel:
     """A real model behind an OpenAI-compatible chat API (Gemini, OpenAI, Groq, Together...).
 
@@ -69,6 +76,7 @@ class OpenAICompatModel:
         self.temperature = temperature
         self.sleep = sleep or time.sleep
         self.waited_seconds = 0.0
+        self.rejected_tool_calls = 0   # provider refused a tool call (e.g. a made-up tool name); for the evaluation
         if client is None:
             from openai import OpenAI
             client = OpenAI(api_key=api_key, base_url=base_url)
@@ -119,12 +127,42 @@ class OpenAICompatModel:
                     self.waited_seconds += wait
                     self.sleep(wait)
                     continue
-                raise RuntimeError(text[:800].strip()) from e
+                raise ModelAPIError(text) from e
+
+    @staticmethod
+    def _failed_generation(err):
+        """Groq rejects a call to a tool that does not exist (HTTP 400, code tool_use_failed) and
+        returns what the model tried in 'failed_generation'. Returns that as a dict, or None."""
+        import json
+        import re
+        text = getattr(err, "full_text", str(err))
+        if "tool_use_failed" not in text:
+            return None
+        m = re.search(r'"failed_generation"\s*:\s*("(?:[^"\\]|\\.)*")', text)
+        if not m:
+            return None
+        try:
+            gen = json.loads(json.loads(m.group(1)))
+        except (json.JSONDecodeError, TypeError):
+            return None
+        return gen if isinstance(gen, dict) else None
 
     def generate(self, messages, tool_schemas):
         import json
         tools = [{"type": "function", "function": s} for s in tool_schemas]
-        resp = self._create_with_retry(self.to_api_messages(messages), tools)
+        try:
+            resp = self._create_with_retry(self.to_api_messages(messages), tools)
+        except ModelAPIError as e:
+            gen = self._failed_generation(e)
+            if gen is None:
+                raise
+            self.rejected_tool_calls += 1
+            args = gen.get("arguments") if isinstance(gen.get("arguments"), dict) else {}
+            if "answer" in args:            # the final answer was wrapped in a fake tool call: keep the answer
+                return ModelReply("final", content=json.dumps(args, ensure_ascii=False),
+                                  usage={"rejected_tool_call": gen.get("name")})
+            # any other made-up tool: let the loop report "unknown tool" back to the model
+            return ModelReply("tool_call", name=gen.get("name") or "unknown", arguments=args)
         msg = resp.choices[0].message
         usage = {}
         if getattr(resp, "usage", None):
@@ -143,21 +181,54 @@ class OpenAICompatModel:
                 if "extra_content" in dump:
                     raw["extra_content"] = dump["extra_content"]
             return ModelReply("tool_call", name=fn.name, arguments=args, usage=usage, raw=raw)
-        return ModelReply("final", content=msg.content or "", usage=usage)
+        import re
+        text = re.sub(r"<think>.*?</think>", "", msg.content or "", flags=re.S).strip()
+        return ModelReply("final", content=text, usage=usage)
 
 
-def model_from_env():
-    """Real model if an API key is in .env, otherwise the demo model."""
-    import os
+# ---- The models we compare. All use the same class, prompt, tools and settings. ----
+PROVIDERS = {
+    "gemini": {"base_url": "https://generativelanguage.googleapis.com/v1beta/openai/", "key": "GEMINI_API_KEY"},
+    "groq":   {"base_url": "https://api.groq.com/openai/v1",                          "key": "GROQ_API_KEY"},
+}
+MODELS = {   # model id -> (provider, type)
+    "gemini-3.5-flash":   ("gemini", "commercial"),
+    "openai/gpt-oss-20b": ("groq",   "open-source"),
+    "qwen/qwen3.8-27b":   ("groq",   "open-source"),
+}
+
+
+def _load_env():
     try:
         from dotenv import load_dotenv
         from pathlib import Path
         load_dotenv(Path(__file__).resolve().parent.parent / ".env")
     except ImportError:
         pass
-    key = os.environ.get("GEMINI_API_KEY", "").strip()
-    if key:
-        return OpenAICompatModel(
-            os.environ.get("MODEL_NAME", "gemini-3.5-flash").strip(), key,
-            base_url="https://generativelanguage.googleapis.com/v1beta/openai/")
-    return DemoModel()
+
+
+def available_models():
+    """Model ids whose API key is present in .env."""
+    import os
+    _load_env()
+    return [m for m, (prov, _) in MODELS.items() if os.environ.get(PROVIDERS[prov]["key"], "").strip()]
+
+
+def make_model(model_id):
+    import os
+    _load_env()
+    prov = PROVIDERS[MODELS[model_id][0]]
+    key = os.environ.get(prov["key"], "").strip()
+    if not key:
+        raise ValueError(f"{prov['key']} is missing in .env")
+    return OpenAICompatModel(model_id, key, base_url=prov["base_url"])
+
+
+def model_from_env():
+    """Real model if an API key is in .env (MODEL_NAME picks which), otherwise the demo model."""
+    import os
+    avail = available_models()
+    wanted = os.environ.get("MODEL_NAME", "").strip()
+    if wanted in avail:
+        return make_model(wanted)
+    return make_model(avail[0]) if avail else DemoModel()

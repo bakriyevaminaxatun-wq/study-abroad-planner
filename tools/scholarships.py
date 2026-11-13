@@ -29,6 +29,16 @@ def _card(row, today):
     }
 
 
+def _field_matches(wanted, fields_text):
+    """Empty field text or 'All ...' / 'no restriction' means every subject is accepted."""
+    if not fields_text:
+        return True
+    text = fields_text.lower().strip()
+    if text.startswith(("all", "any")) or "no restriction" in text:
+        return True
+    return wanted.lower() in text
+
+
 def search_scholarships(country=None, field=None, gpa=None, language_score=None,
                         deadline_before=None, funding_type=None,
                         db_path=None, today=None):
@@ -46,7 +56,7 @@ def search_scholarships(country=None, field=None, gpa=None, language_score=None,
     for r in rows:
         if country and country.lower() not in (r["country"] or "").lower():
             continue
-        if field and r["fields_of_study"] and field.lower() not in r["fields_of_study"].lower():
+        if field and not _field_matches(field, r["fields_of_study"]):
             continue
         if gpa is not None and r["min_gpa"] is not None and r["min_gpa"] > float(gpa):
             continue
@@ -64,9 +74,13 @@ def search_scholarships(country=None, field=None, gpa=None, language_score=None,
     order = {"upcoming": 0, "no_fixed_date": 1, "closed": 2}
     out.sort(key=lambda c: (order[c["deadline_status"]],
                             c["next_deadline_date"] or "9999", c["name"]))
-    return {"count": len(out), "results": out,
-            "note": "Only verified records are searched. 'closed' means the last known "
-                    "date has passed; 'no_fixed_date' means check deadline_text and the source page."}
+    note = ("Only verified records are searched. 'closed' means the last known "
+            "date has passed; 'no_fixed_date' means check deadline_text and the source page.")
+    if not out:
+        note = ("No scholarship matches ALL these filters. Do not repeat the same search: "
+                "remove one filter (for example field or funding_type) and search again, "
+                "or tell the student nothing matched. " + note)
+    return {"count": len(out), "results": out, "note": note}
 
 
 def get_application_requirements(scholarship_id, db_path=None, today=None):

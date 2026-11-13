@@ -14,7 +14,7 @@ sys.path.insert(0, str(ROOT))
 import streamlit as st
 
 from agent.loop import Agent, load_system_prompt
-from agent.models import DemoModel, model_from_env
+from agent.models import MODELS, DemoModel, available_models, make_model, model_from_env
 from agent.registry import build_default_registry
 from tools.profile import get_user_profile, update_user_profile
 
@@ -42,14 +42,16 @@ TEXT = {
 }
 
 
-def get_model():
-    return model_from_env()
+def get_model(model_id=None):
+    return make_model(model_id) if model_id else model_from_env()
 
 
-def get_agent():
-    if "agent" not in st.session_state:
+def get_agent(model_id=None):
+    """One agent per chosen model. Choosing another model in the sidebar builds a new agent."""
+    cur = st.session_state.get("agent")
+    if cur is None or (model_id and getattr(cur.model, "name", None) != model_id):
         registry = build_default_registry(db_path=DB_PATH, rates_path=RATES_PATH)
-        st.session_state.agent = Agent(get_model(), registry, load_system_prompt(), USER_ID,
+        st.session_state.agent = Agent(get_model(model_id), registry, load_system_prompt(), USER_ID,
                                        approval_mode="ask", log_path=ROOT / "logs" / "app_runs.jsonl")
     return st.session_state.agent
 
@@ -80,6 +82,15 @@ def main():
     lang = st.sidebar.radio("Language / Dil", ["en", "az"], horizontal=True,
                             format_func=lambda x: {"en": "English", "az": "Azərbaycanca"}[x])
     t = TEXT[lang]
+    models = available_models()
+    chosen = None
+    if models:
+        default = getattr(st.session_state.get("agent"), "model", None)
+        default = getattr(default, "name", models[0])
+        chosen = st.sidebar.selectbox(
+            "Model", models, index=models.index(default) if default in models else 0,
+            format_func=lambda m: f"{m} ({MODELS[m][1]})")
+    get_agent(chosen)
     st.title(t["title"])
     if isinstance(get_agent().model, DemoModel):
         st.info(t["demo"])

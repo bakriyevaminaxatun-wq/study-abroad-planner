@@ -134,3 +134,19 @@ def test_budget_errors(env):
         calculate_budget([1], 0, 0, adhoc_items=[{"label": "x", "amount": 5, "currency": "GBP"}],
                          db_path=env["db"], rates_path=env["rates"])
     assert "GBP" in str(e.value)
+
+
+def test_all_fields_scholarships_match_any_field():
+    from tools.scholarships import _field_matches
+    assert _field_matches("Computer Science", "All (art, music have separate programmes)")
+    assert _field_matches("Computer Science", "All subjects")
+    assert _field_matches("Computer Science", "All fields (hundreds of programmes)")
+    assert _field_matches("Computer Science", None)
+    assert _field_matches("engineering", "Development-related subjects (economics, engineering)")
+    assert not _field_matches("Computer Science", "STEM only")
+
+
+def test_empty_search_tells_model_to_drop_a_filter(env):
+    from tools.scholarships import search_scholarships
+    r = search_scholarships(country="Nowhereland", db_path=env["db"])
+    assert r["count"] == 0 and "remove one filter" in r["note"]

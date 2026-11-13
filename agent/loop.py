@@ -112,6 +112,11 @@ class Agent:
             r.model_calls += 1
             for k in ("input_tokens", "output_tokens"):
                 r.usage[k] += int((reply.usage or {}).get(k, 0))
+            bad = (reply.usage or {}).get("rejected_tool_call")
+            if bad:                     # model wrapped its answer in a made-up tool call
+                r.invalid_tool_calls += 1
+                r.steps.append(Step(len(r.steps) + 1, "invalid_tool_call", bad, None,
+                                    "Answer was sent as a call to a tool that does not exist; answer kept."))
             if reply.kind == "final":
                 r.final, r.format_ok = parse_final(reply.content)
                 r.steps.append(Step(len(r.steps) + 1, "final", result=r.final))
@@ -196,5 +201,5 @@ class Agent:
 
 
 def load_system_prompt(path=None):
-    path = Path(path or Path(__file__).resolve().parent.parent / "prompts" / "system_v1.md")
+    path = Path(path or Path(__file__).resolve().parent.parent / "prompts" / "system_v2.md")
     return path.read_text(encoding="utf-8")

@@ -134,3 +134,63 @@ def test_other_errors_are_not_retried(registry):
     waits = []
     r = Agent(OpenAICompatModel("fake", "k", client=client, sleep=waits.append), registry, "s", "u1").start("x")
     assert r.status == "model_error" and waits == []
+
+
+def test_model_list_follows_keys(monkeypatch):
+    from agent import models
+    monkeypatch.setattr(models, "_load_env", lambda: None)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setenv("GROQ_API_KEY", "x")
+    assert models.available_models() == ["openai/gpt-oss-20b", "qwen/qwen3.8-27b"]
+    m = models.make_model("qwen/qwen3.8-27b")
+    assert m.name == "qwen/qwen3.8-27b" and "groq" in str(m.client.base_url)
+    monkeypatch.delenv("GROQ_API_KEY")
+    assert isinstance(models.model_from_env(), models.DemoModel)
+
+
+def test_think_blocks_are_removed():
+    reply = NS(choices=[NS(message=NS(tool_calls=None, content='<think>hmm</think>\n{"answer": "a"}'))], usage=None)
+    client = NS(chat=NS(completions=NS(create=lambda **kw: reply)))
+    out = OpenAICompatModel("q", "k", client=client).generate([{"role": "user", "content": "x"}], [])
+    assert out.content == '{"answer": "a"}'
+
+
+GROQ_400 = ('Error code: 400 - {"error":{"message":"Tool call validation failed: attempted to call tool \'JSON\' '
+            'which was not in request.tools","type":"invalid_request_error","code":"tool_use_failed",'
+            '"failed_generation":"{\\"name\\": \\"JSON\\", \\"arguments\\": {\\"answer\\":\\"Try DAAD.\\",'
+            '\\"sources\\":[\\"https://daad.de\\"],\\"caveats\\":[]}}"}}')
+
+
+def test_answer_wrapped_in_fake_tool_is_kept_and_counted(registry):
+    class BadRequest(Exception):
+        status_code = 400
+    def create(**kw):
+        raise BadRequest(GROQ_400)
+    client = NS(chat=NS(completions=NS(create=create)))
+    model = OpenAICompatModel("openai/gpt-oss-20b", "k", client=client)
+    r = Agent(model, registry, "s", "u1").start("Which scholarships fit me?")
+    assert r.status == "ok" and r.final["answer"] == "Try DAAD."
+    assert r.invalid_tool_calls == 1 and model.rejected_tool_calls == 1
+    assert any(s.kind == "invalid_tool_call" and s.name == "JSON" for s in r.steps)
+
+
+def test_unrelated_400_still_fails(registry):
+    class BadRequest(Exception):
+        status_code = 400
+    def create(**kw):
+        raise BadRequest("Error code: 400 - bad request")
+    client = NS(chat=NS(completions=NS(create=create)))
+    r = Agent(OpenAICompatModel("m", "k", client=client), registry, "s", "u1").start("x")
+    assert r.status == "model_error"
+
+
+def test_long_rejected_answer_is_not_cut_off(registry):
+    class BadRequest(Exception):
+        status_code = 400
+    long_answer = "A" * 3000
+    err = GROQ_400.replace("Try DAAD.", long_answer)
+    def create(**kw):
+        raise BadRequest(err)
+    client = NS(chat=NS(completions=NS(create=create)))
+    r = Agent(OpenAICompatModel("m", "k", client=client), registry, "s", "u1").start("x")
+    assert r.final["answer"] == long_answer
