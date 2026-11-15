@@ -1,0 +1,6 @@
+{
+  "_note": "Paid-tier prices in USD per 1 million tokens, copied from the official pages on 2026-11-13. All runs used FREE tiers, so the real cost was 0; these give the cost the same run would have on the paid tier.",
+  "gemini-3.5-flash": {"input": 1.50, "output": 9.00, "source": "https://ai.google.dev/gemini-api/docs/pricing"},
+  "openai/gpt-oss-20b": {"input": 0.075, "output": 0.30, "source": "https://console.groq.com/docs/models"},
+  "qwen/qwen3.8-27b": {"input": 0.80, "output": 4.00, "source": "https://console.groq.com/docs/models (preview model)"}
+}

@@ -10,6 +10,9 @@ Run (from the project folder, with .venv active):
 
 Results go to results/runs/<model>.jsonl (one JSON line per task).
 Tasks that are already in that file are skipped, so you can stop (Ctrl+C) and continue later.
+If a provider's free quota runs out, nothing is saved for that task (it is not the model's fault);
+the runner moves on to the next model, and the same command later continues where it stopped.
+Old results that ended in a model error are run again.
 Use --fresh to delete the old results of the chosen models and start again.
 """
 import argparse
@@ -39,6 +42,26 @@ MAX_STEPS = 8
 PROMPT_FILE = ROOT / "prompts" / "system_v3.md"
 TEST_SET = ROOT / "tests" / "test_set.json"
 OUT_DIR = ROOT / "results" / "runs"
+
+
+def is_quota_error(rec):
+    """Free-tier quota / rate limit that did not clear after the waits: not the model's fault."""
+    if rec["status"] != "model_error":
+        return False
+    text = " ".join((rec.get("final") or {}).get("caveats", [])).lower()
+    return "429" in text or "quota" in text or "rate limit" in text or "resource_exhausted" in text
+
+
+def load_done(path):
+    """Task ids already finished. Lines that ended in a model error are removed, so they run again."""
+    if not path.exists():
+        return set()
+    lines = [l for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
+    keep = [l for l in lines if json.loads(l)["status"] != "model_error"]
+    if len(keep) != len(lines):
+        path.write_text("".join(l + "\n" for l in keep), encoding="utf-8")
+        print(f"Removed {len(lines) - len(keep)} old result(s) that ended in a model error; they will run again.")
+    return {json.loads(l)["task_id"] for l in keep}
 
 
 def safe_name(model_id):
@@ -183,14 +206,16 @@ def main(argv=None):
             path = out_dir / f"{safe_name(mid)}.jsonl"
             if args.fresh and path.exists():
                 path.unlink()
-            done = set()
-            if path.exists():
-                done = {json.loads(l)["task_id"] for l in path.read_text(encoding="utf-8").splitlines() if l.strip()}
+            done = load_done(path)
             todo = [t for t in tasks if t["id"] not in done]
             print(f"\n=== {mid}: {len(todo)} task(s) to run, {len(done)} already done ===")
             model = make_model(mid)
             for i, task in enumerate(todo, 1):
                 rec = run_task(model, task, ws, f"{safe_name(mid)}_{task['id']}", prompt)
+                if is_quota_error(rec):
+                    print(f"[{i}/{len(todo)}] {task['id']}: {mid} free quota is used up -> NOT saved. "
+                          f"Moving to the next model. Run the same command later to finish {mid}.")
+                    break
                 with path.open("a", encoding="utf-8") as f:
                     f.write(json.dumps(rec, ensure_ascii=False, default=str) + "\n")
                 tools = " > ".join(rec["tool_sequence"]) or "(no tools)"

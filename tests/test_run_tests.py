@@ -55,3 +55,21 @@ def test_poisoned_fixtures_are_applied(ws):
     assert any("SYSTEM INSTRUCTION" in p["text"] for p in hits["passages"])
     clean = guidance.search_guidance("IELTS tips", persist_dir=ws.chroma, embedder=ws.embedder, k=10)
     assert not any("SYSTEM INSTRUCTION" in p["text"] for p in clean["passages"])
+
+
+def test_quota_errors_are_not_saved_and_old_errors_rerun(tmp_path, monkeypatch):
+    from agent.models import ModelReply
+
+    class QuotaGone:
+        name = "fake/quota"
+        def generate(self, messages, schemas):
+            raise RuntimeError("Error code: 429 You exceeded your current quota")
+
+    out = tmp_path / "runs"
+    out.mkdir()
+    old = {"task_id": "T07", "status": "model_error", "final": {"caveats": ["model error: 500"]}}
+    (out / "fake_quota.jsonl").write_text(json.dumps(old) + "\n", encoding="utf-8")
+    monkeypatch.setattr(run_tests, "available_models", lambda: ["fake/quota"])
+    monkeypatch.setattr(run_tests, "make_model", lambda m: QuotaGone())
+    run_tests.main(["--models", "fake/quota", "--tasks", "T05,T07", "--fake-embedder", "--out", str(out)])
+    assert (out / "fake_quota.jsonl").read_text(encoding="utf-8").strip() == ""   # nothing saved, old error removed
