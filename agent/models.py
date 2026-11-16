@@ -142,10 +142,20 @@ class OpenAICompatModel:
         if not m:
             return None
         try:
-            gen = json.loads(json.loads(m.group(1)))
-        except (json.JSONDecodeError, TypeError):
+            raw = json.loads(m.group(1))
+        except json.JSONDecodeError:
             return None
-        return gen if isinstance(gen, dict) else None
+        try:                                   # format 1: {"name": "...", "arguments": {...}}
+            gen = json.loads(raw)
+            if isinstance(gen, dict):
+                return gen
+        except (json.JSONDecodeError, TypeError):
+            pass
+        f = re.search(r"<function=([\w\-.]+)>", raw)   # format 2: <tool_call><function=NAME>...</function>
+        if f:
+            args = dict(re.findall(r"<parameter=([\w\-.]+)>\s*(.*?)\s*</parameter>", raw, flags=re.S))
+            return {"name": f.group(1), "arguments": args}
+        return None
 
     def generate(self, messages, tool_schemas):
         import json

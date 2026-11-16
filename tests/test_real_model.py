@@ -194,3 +194,23 @@ def test_long_rejected_answer_is_not_cut_off(registry):
     client = NS(chat=NS(completions=NS(create=create)))
     r = Agent(OpenAICompatModel("m", "k", client=client), registry, "s", "u1").start("x")
     assert r.final["answer"] == long_answer
+
+
+def test_misspelled_tool_in_xml_format_becomes_invalid_call(registry):
+    class BadRequest(Exception):
+        status_code = 400
+    err = ('Error code: 400 - {"error":{"message":"tool call validation failed: attempted to call tool '
+           '\'search_scholarisms\'","code":"tool_use_failed","failed_generation":'
+           '"\\u003ctool_call\\u003e\\n\\u003cfunction=search_scholarisms\\u003e\\n\\u003c/function\\u003e\\n'
+           '\\u003c/tool_call\\u003e"}}')
+    calls = {"n": 0}
+    def create(**kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise BadRequest(err)
+        return NS(choices=[NS(message=NS(tool_calls=None, content='{"answer": "ok", "sources": [], "caveats": []}'))],
+                  usage=None)
+    client = NS(chat=NS(completions=NS(create=create)))
+    r = Agent(OpenAICompatModel("q", "k", client=client), registry, "s", "u1").start("x")
+    assert r.status == "ok" and r.invalid_tool_calls == 1
+    assert any(s.kind == "invalid_tool_call" and s.name == "search_scholarisms" for s in r.steps)
