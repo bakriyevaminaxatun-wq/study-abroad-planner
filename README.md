@@ -10,7 +10,10 @@ Applying for scholarships abroad means tracking many deadlines, documents, fees 
 2. **Which scholarships fit me?** Matching by field, GPA, English level, target country and funding type, with the closest deadline shown first.
 3. **How much do I need to save?** The total cost in AZN for every chosen application, and how much to save per month to meet each deadline.
 
-The agent also lists the documents still missing for a scholarship and explains where each fact comes from.
+The agent also lists the documents still missing for a scholarship and says where each fact comes from.
+
+**Target user:** an Azerbaijani student or graduate planning a master's abroad.
+**Success criteria:** budget numbers always come from the calculator; deadlines and fees match the database and come with a source link; no invented scholarships; forbidden requests are refused; it works in both languages (measured in the evaluation below).
 
 ## What it will not do
 
@@ -21,15 +24,18 @@ The agent also lists the documents still missing for a scholarship and explains 
 
 ## How it works
 
-The agent follows a loop until the task is done:
+![Agent loop](docs/agent_loop.png)
 
-**receive request → load student profile → plan → call a tool → check the result → repeat → answer**
+**receive → plan → call a tool → check the result → repeat → answer** (details and design reasons in [docs/architecture.md](docs/architecture.md))
 
-- **Approach:** ReAct, so the model decides the next step after each tool result.
-- **Framework:** LangGraph (graph structure, human approval pauses, state between turns).
-- **Step limit:** the loop stops after a fixed number of steps, and tool errors are returned to the model in readable form.
-- **Human approval:** needed before saving a reminder or any export.
-- **Answer format:** structured JSON, shown in a Streamlit chat with a side panel that displays every agent step and tool call.
+- **Approach:** ReAct. The model decides the next step after each tool result, because the questions need 1 to 4 tool calls in an order that depends on the results.
+- **Framework:** none. The agent loop is a small plain-Python loop (`agent/loop.py`). The project only needs a step limit, tool checks, retries, an approval pause and logging, and writing them directly keeps every step visible and testable. All models use the same loop through one OpenAI-compatible connection, which keeps the comparison fair.
+- **Step limit:** 8 model calls per question, so the agent can never loop forever.
+- **Errors:** wrong tool names or arguments are sent back to the model as readable errors (and counted). Temporary tool errors are retried up to 2 times. Rate limits (HTTP 429) and overloaded servers (503) are waited out and retried.
+- **Human approval:** `add_reminder` pauses and shows Approve / Deny buttons before anything is saved.
+- **Prompt injection:** tool results are wrapped as `<tool_result>` data, and the prompt says text inside them is never an instruction. Two test tasks hide fake "SYSTEM" instructions in the data to check this.
+- **Answer format:** JSON with `answer`, `sources` and `caveats`, shown in a Streamlit chat with a side panel that lists every step and tool call.
+- **Memory:** short-term = the last 10 chat messages; long-term = the student's profile, chosen applications, completed tasks and reminders in SQLite.
 
 ## Tools
 
@@ -43,58 +49,78 @@ The agent follows a loop until the task is done:
 | `search_guidance` | Searches advice on motivation letters, recommendation letters, CV, IELTS and document preparation |
 | `add_reminder` | Saves a task or reminder after the student approves it |
 
-All money math is done in code (`calculate_budget`), never by the language model. It handles currency conversion, a shared IELTS cost counted once, an optional retake buffer, and a check of whether each deadline is affordable.
+Every tool has a name, a description written for the model and a JSON schema for its parameters (`agent/registry.py`). All money math is done in code (`calculate_budget`), never by the language model: currency conversion with Central Bank of Azerbaijan rates, a shared IELTS cost counted once, an optional retake buffer, and whether each deadline is affordable.
 
 ## Data
 
-The scholarship data lives in one Excel file, `study_abroad_data_sheet.xlsx`, with four tabs: **Instructions**, **Scholarships**, **Cost_Items** and **Rates**. It is loaded into SQLite for the agent.
+The scholarship data lives in one Excel file, `data/study_abroad_data_sheet.xlsx`, with four tabs: **Instructions**, **Scholarships**, **Cost_Items** and **Rates**. `data/load_sheet.py` loads it into SQLite.
 
-- Every record has a **source URL** and a **last verified** date, and the agent shows both.
-- Deadlines can be free text (for example "December or spring intake"). An optional exact date is used only for budget checks.
-- If a round is closed or the next one is not announced, the agent says so instead of showing an old date.
-- Guidance texts (tips, advice) are cleaned, saved as UTF-8 for Azerbaijani letters, split into chunks and stored in a vector database (ChromaDB) with a multilingual embedding model.
-
-Starting scholarships include Chevening, DAAD, Erasmus Mundus, Stipendium Hungaricum, SISGP, Fulbright, Eiffel, the Netherlands NL Scholarship and the Azerbaijan State Program for studying abroad.
-
-## Data collector agent
-
-A second, smaller agent helps fill the Excel sheet. It searches the web, reads **official** scholarship pages and writes **draft** rows with an evidence note for each fact.
-
-- It prefers official government, funder and university sites.
-- It never guesses: anything missing is written as "not found".
-- Drafts are marked "AI DRAFT - not verified". Only a human can verify a row and set its date.
+- Rows were filled from **official** scholarship pages (researched with the help of Claude). Every row has a **source URL** and a **last verified** date, and its notes say how it was checked. Empty cells mean the official page did not state the value; nothing was guessed.
+- Only verified rows are loaded: currently **15 scholarships** (for example Chevening, DAAD, Erasmus Mundus, Stipendium Hungaricum, SISGP, Fulbright, Eiffel, NL Scholarship, Türkiye Bursları and the Azerbaijan State Program). 4 are marked excluded because Azerbaijani citizens cannot apply, and 4 are left unverified and are not loaded.
+- Exchange rates come from the Central Bank of Azerbaijan (CBAR), with their date.
+- Deadlines can be free text (for example "December or spring intake"). An exact date is stored only when the official page gives one. Closed rounds are reported as closed.
+- Guidance texts (`data/guidance/`) are cleaned, saved as UTF-8 for Azerbaijani letters, split into chunks and stored in ChromaDB with a multilingual embedding model (`intfloat/multilingual-e5-small`).
 
 ## Safety and reliability
 
-- Retrieved web text is treated as data, never as instructions (prompt-injection protection, tested).
+- Tool results are data, never instructions (prompt-injection protection, tested with poisoned data).
+- Approval is required before saving a reminder.
 - API keys are kept in a `.env` file that is excluded from GitHub.
-- Tests use synthetic student profiles only. No real personal data is stored.
+- Tests use synthetic (fake) scholarships and student profiles only. No real personal data is stored.
+
+## Prompts
+
+`prompts/system_v1.md`, `system_v2.md` and `system_v3.md`, with the reason for every change in `prompts/CHANGELOG.md`. v3 is used by the app and the evaluation.
 
 ## Evaluation
 
-The agent is tested with **24 tasks** (12 in Azerbaijani, 12 in English): simple one-tool tasks, multi-step tasks, and forbidden or unanswerable requests such as "guarantee I will win".
+**Test set:** 24 tasks (`tests/test_set.json`), 12 in Azerbaijani and 12 in English, with the same scenarios in both languages: 8 simple (one tool), 10 multi-step and 6 forbidden or unanswerable (guarantee a win, predict chances, ghost-write a letter, a missing exact deadline, two prompt-injection cases). Each task has an expected result and an expected tool sequence.
 
-Three or more models are compared with the same prompt, tools and settings: at least one commercial model (Claude, GPT or Gemini) and two open-source models (for example Qwen and Llama or Mistral). For each model and language, the results report:
+**Same conditions for every model:** the same synthetic data, profiles, prompt (v3), tools, step limit and fixed date. Every task is logged in `results/runs/<model>.jsonl` (steps, tool calls with arguments, results, time, tokens).
 
-- task success rate
-- tool selection and parameter accuracy
-- average number of steps
-- hallucinations and invented tool calls
-- latency and cost per task
+**Scoring** (`eval/evaluate.py`): a task succeeds only if all its checks pass. Exact checks compare the answer with the tool results (tool order, invented dates or money, sources, approval, injection). Keyword checks (for example "did it refuse?") are marked for manual review in `results/scored_tasks.csv`.
 
-Every run is logged (steps, tool calls, duration, tokens, cost) in JSON files.
+**Models:**
+
+| Model | Type | Provider |
+|---|---|---|
+| Gemini 3.5 Flash | commercial | Google (free tier) |
+| Claude Sonnet 5.5 | commercial | Anthropic (paid credits) |
+| gpt-oss-20b | open-source | Groq (free tier) |
+| Qwen 3.8 27B | open-source | Groq (free tier, preview model) |
+
+**Results so far** (all tasks; per-language tables, task types and every check in [results/summary.md](results/summary.md); chart in `results/success_rate.png`):
+
+| Model | Tasks run | Success | Right tools | Valid tool calls | Tasks with hallucination | Avg seconds* | Cost per task** |
+|---|---|---|---|---|---|---|---|
+| Claude Sonnet 5.5 | 24 | 70.8% | 95.8% | 100% | 1 | 10.8 | $0.051 |
+| Gemini 3.5 Flash | 10 (running) | 100% | 100% | 100% | 0 | 10.6 | $0.014 |
+| gpt-oss-20b | 24 | 54.2% | 75.0% | 61.6% | 4 | 34.8 | $0.0007 |
+| Qwen 3.8 27B | 24 | 66.7% | 87.5% | 97.8% | 1 | 48.5 | $0.006 |
+
+\* without time spent waiting for free-tier rate limits. \*\* at each provider's paid price (`eval/prices.json`); free-tier runs really cost 0.
+Gemini is limited to about 5 tasks a day on the free tier, so its row is not final yet. One Qwen task (T13) hit a Groq server overload and will be re-run.
+
+**First findings:**
+- gpt-oss-20b is fast and cheap but unreliable on multi-step tasks (2/10): broken tool arguments, answers in the wrong language, and money it calculated itself.
+- Qwen chooses tools well but sometimes adds leftover tool-call markup after its JSON answer.
+- Claude's answers are accurate when it finishes, but through the OpenAI-compatible connection it repeated identical tool calls 33 times, which caused all of its step-limit failures and raised its cost.
 
 ## Project structure
 
 ```
 study-abroad-planner/
-  agent/        registry.py (tools + schemas), loop.py (agent loop), models.py (model interface, fake model)
-  app/          streamlit_app.py (chat, steps panel, profile form, approval buttons)
-  data/         schema.sql, load_sheet.py (Excel -> database), guidance/ (advice notes), the Excel sheet
-  tools/        budget.py, scholarships.py, profile.py, guidance.py, db.py
-  prompts/      system_v1.md and CHANGELOG.md
-  tests/        unit tests, test_set.json (24 agent tasks), build_test_set.py
-  logs/         run logs (git-ignored)
+  agent/     loop.py (agent loop), registry.py (tools + JSON schemas), models.py (model connections, demo and test models)
+  app/       streamlit_app.py (chat, steps panel, profile form, approval buttons, model picker)
+  data/      schema.sql, load_sheet.py (Excel -> database), guidance/ (advice notes), the Excel sheet, rates.json
+  tools/     budget.py, scholarships.py, profile.py, guidance.py, db.py
+  prompts/   system_v1.md, system_v2.md, system_v3.md, CHANGELOG.md
+  eval/      run_tests.py (runs the 24 tasks on each model), evaluate.py (scores, tables, chart), prices.json,
+             check_claude_tools.py (small cost-capped diagnostic)
+  results/   runs/*.jsonl (one log line per task), summary.md, summary.csv, scored_tasks.csv, success_rate.png
+  tests/     unit tests (pytest), test_set.json (24 agent tasks), build_test_set.py
+  docs/      architecture.md, agent_loop.png, components.png
+  logs/      app chat logs (git-ignored)
 ```
 
 ## Setup
@@ -106,31 +132,46 @@ pip install -r requirements.txt
 copy .env.example .env
 ```
 
-Then, one command per line:
+Put your API keys in `.env` (never commit it). Each one is optional; the app shows the models whose key is present, and runs in demo mode without any key:
 
 ```
-python data/load_sheet.py          # Excel sheet -> database (only VERIFIED rows are loaded)
-python -m tools.guidance           # build the guidance search database (downloads a small model the first time)
-pytest                             # run all tests
-streamlit run app/streamlit_app.py # open the interface (demo mode, no API key needed)
+GEMINI_API_KEY=...      # https://aistudio.google.com/apikey
+GROQ_API_KEY=...        # https://console.groq.com/keys (gpt-oss-20b, Qwen)
+ANTHROPIC_API_KEY=...   # https://platform.claude.com/settings/keys (paid)
 ```
 
-Add your API keys to `.env` later, when a real model is connected. Never commit that file.
+Then:
+
+```
+python data/load_sheet.py                     # Excel sheet -> database (only verified rows)
+python -m tools.guidance                      # build the guidance search database (downloads a small model once)
+pytest                                        # run all tests (they never call a paid model)
+python -m streamlit run app/streamlit_app.py  # open the app; choose the model in the sidebar
+```
+
+Evaluation:
+
+```
+python -m eval.run_tests --models openai/gpt-oss-20b --tasks T05,T07   # try 2 tasks first
+python -m eval.run_tests --models all                                   # all 24 tasks on every model with a key
+python -m eval.evaluate                                                 # scores, tables and chart in results/
+```
+
+The runner skips tasks that are already done, so you can stop with Ctrl+C and continue later. If a free quota runs out, nothing is saved for that task and the same command continues the next day.
 
 ## Status
 
 | Part | State |
 |---|---|
-| Repository, database schema, Excel-to-database loader | Done, tested |
-| `search_scholarships`, `get_application_requirements`, `get_deadlines`, profile tools, `add_reminder` | Done, tested |
-| `calculate_budget` | Done, tested |
-| Guidance knowledge base (cleaning, chunking, multilingual embeddings, search) | Done, tested with a fake embedder |
-| Agent loop (step limit, retries, approval pause, injection-safe tool results) | Done, tested with a fake model |
-| Streamlit interface layout | Done, runs in demo mode |
-| 24-task test set (12 Azerbaijani, 12 English) | Written; runner for real models is planned |
-| Scholarship data | Excel sheet has 3 AI drafts that need human verification |
-| Data collector agent, real models, multi-model evaluation | Planned |
+| Database, Excel loader, 7 tools, budget calculator | Done, tested |
+| Guidance knowledge base (cleaning, chunking, multilingual embeddings, search) | Done, tested |
+| Agent loop (step limit, retries, approval, injection-safe results) | Done, tested |
+| Streamlit app with model picker | Done |
+| Real models: Gemini, Claude, gpt-oss-20b, Qwen | Connected |
+| 24-task test set, runner, scoring, tables and chart | Done |
+| Evaluation runs | Claude, gpt-oss and Qwen complete; Gemini in progress (free-tier limit) |
+| Guidance texts | 4 short sample notes; real advice texts still to add |
 
 ## Later ideas
 
-More scholarships, a universities and programmes database, a Telegram bot or mobile app, daily "what to do today" notifications, and user accounts with document upload.
+More scholarships, a universities and programmes database, a guard against repeated identical tool calls, a Telegram bot or mobile app, daily "what to do today" notifications, and user accounts with document upload.

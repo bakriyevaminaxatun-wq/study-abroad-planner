@@ -11,8 +11,9 @@ APP = str(Path(__file__).resolve().parent.parent / "app" / "streamlit_app.py")
 def no_real_models(monkeypatch):
     """App tests always use the demo model: no API calls, no quota used, whatever is in .env.
     Empty values win because load_dotenv never overwrites variables that are already set."""
-    for key in ("GEMINI_API_KEY", "GROQ_API_KEY"):
-        monkeypatch.setenv(key, "")
+    from agent.models import PROVIDERS
+    for prov in PROVIDERS.values():          # every provider, also ones added later (e.g. Claude)
+        monkeypatch.setenv(prov["key"], "")
 
 
 def test_app_runs_and_answers(env, monkeypatch):

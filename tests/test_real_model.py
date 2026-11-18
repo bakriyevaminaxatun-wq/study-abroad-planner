@@ -140,6 +140,7 @@ def test_model_list_follows_keys(monkeypatch):
     from agent import models
     monkeypatch.setattr(models, "_load_env", lambda: None)
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setenv("GROQ_API_KEY", "x")
     assert models.available_models() == ["openai/gpt-oss-20b", "qwen/qwen3.8-27b"]
     m = models.make_model("qwen/qwen3.8-27b")
@@ -214,3 +215,34 @@ def test_misspelled_tool_in_xml_format_becomes_invalid_call(registry):
     r = Agent(OpenAICompatModel("q", "k", client=client), registry, "s", "u1").start("x")
     assert r.status == "ok" and r.invalid_tool_calls == 1
     assert any(s.kind == "invalid_tool_call" and s.name == "search_scholarisms" for s in r.steps)
+
+
+def test_overloaded_server_is_retried(registry):
+    class Overloaded(Exception):
+        status_code = 503
+    client = FakeClient()
+    orig, calls = client.create, {"n": 0}
+    def flaky(**kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise Overloaded("Error code: 503 - model is currently over capacity")
+        return orig(**kw)
+    client.chat.completions.create = flaky
+    waits = []
+    r = Agent(OpenAICompatModel("q", "k", client=client, sleep=waits.append), registry, "s", "u1").start("x")
+    assert r.status == "ok" and waits == [20.0]
+
+
+def test_claude_is_sent_without_temperature(monkeypatch):
+    from agent import models
+    monkeypatch.setattr(models, "_load_env", lambda: None)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+    m = models.make_model("claude-sonnet-5-5")
+    assert m.temperature is None and "anthropic" in str(m.client.base_url)
+    seen = {}
+    def create(**kw):
+        seen.update(kw)
+        return NS(choices=[NS(message=NS(tool_calls=None, content='{"answer": "a"}'))], usage=None)
+    m.client = NS(chat=NS(completions=NS(create=create)))
+    m.generate([{"role": "user", "content": "x"}], [])
+    assert "temperature" not in seen

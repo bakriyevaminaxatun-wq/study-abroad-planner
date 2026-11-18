@@ -45,11 +45,13 @@ OUT_DIR = ROOT / "results" / "runs"
 
 
 def is_quota_error(rec):
-    """Free-tier quota / rate limit that did not clear after the waits: not the model's fault."""
+    """Free-tier quota, rate limit or an overloaded server that did not clear after the waits:
+    not the model's fault."""
     if rec["status"] != "model_error":
         return False
     text = " ".join((rec.get("final") or {}).get("caveats", [])).lower()
-    return "429" in text or "quota" in text or "rate limit" in text or "resource_exhausted" in text
+    return any(w in text for w in ("429", "quota", "rate limit", "resource_exhausted",
+                                    "503", "over capacity", "overloaded", "unavailable"))
 
 
 def load_done(path):
@@ -62,6 +64,18 @@ def load_done(path):
         path.write_text("".join(l + "\n" for l in keep), encoding="utf-8")
         print(f"Removed {len(lines) - len(keep)} old result(s) that ended in a model error; they will run again.")
     return {json.loads(l)["task_id"] for l in keep}
+
+
+PRICES = json.loads((Path(__file__).parent / "prices.json").read_text(encoding="utf-8"))
+
+
+def task_cost(rec):
+    """Paid-tier price of this task's tokens in USD (None if the price is unknown)."""
+    p = PRICES.get(rec["model"])
+    if not p:
+        return None
+    u = rec.get("usage") or {}
+    return (u.get("input_tokens", 0) * p["input"] + u.get("output_tokens", 0) * p["output"]) / 1_000_000
 
 
 def safe_name(model_id):
@@ -210,6 +224,7 @@ def main(argv=None):
             todo = [t for t in tasks if t["id"] not in done]
             print(f"\n=== {mid}: {len(todo)} task(s) to run, {len(done)} already done ===")
             model = make_model(mid)
+            total_cost = 0.0
             for i, task in enumerate(todo, 1):
                 rec = run_task(model, task, ws, f"{safe_name(mid)}_{task['id']}", prompt)
                 if is_quota_error(rec):
@@ -219,8 +234,13 @@ def main(argv=None):
                 with path.open("a", encoding="utf-8") as f:
                     f.write(json.dumps(rec, ensure_ascii=False, default=str) + "\n")
                 tools = " > ".join(rec["tool_sequence"]) or "(no tools)"
+                cost = task_cost(rec)
+                total_cost += cost or 0.0
+                u = rec.get("usage") or {}
+                money = f"  ${cost:.4f} (total ${total_cost:.3f})" if cost is not None else ""
                 print(f"[{i}/{len(todo)}] {task['id']} {task['language']} {task['category']:<9} "
-                      f"{rec['status']:<11} {rec['seconds']:>6.1f}s  tools: {tools}")
+                      f"{rec['status']:<11} {rec['seconds']:>6.1f}s  tokens {u.get('input_tokens', 0)}/"
+                      f"{u.get('output_tokens', 0)}{money}  tools: {tools}")
                 if rec["status"] == "model_error":
                     print("      error:", "; ".join(rec["final"].get("caveats", []))[:300])
             print(f"Saved: {path}")

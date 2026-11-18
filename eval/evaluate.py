@@ -439,9 +439,9 @@ def main():
     parts = ["# Model evaluation results", "",
              f"Tasks: 24 per model (12 Azerbaijani, 12 English). Prompt: {recs[0].get('prompt_version')}. "
              "A task succeeds only if all its checks pass.",
-             "Cost: all runs used free tiers (real cost 0). `cost_per_task_usd` is what the same tokens would "
-             "cost on the paid tier (prices in eval/prices.json). `avg_seconds` includes waiting for free-tier "
-             "rate limits; the next column leaves that waiting out.", ""]
+             "Cost: `cost_per_task_usd` is what the tokens cost at each model's paid-tier price (eval/prices.json), "
+             "so all models are compared the same way; free-tier runs really cost 0. `avg_seconds` includes "
+             "waiting for free-tier rate limits; the next column leaves that waiting out.", ""]
     for lang, title in (("az", "Azerbaijani tasks"), ("en", "English tasks"), ("all", "All tasks")):
         parts += [f"## {title}", "", md_table([r for r in rows if r["language"] == lang], cols), ""]
 

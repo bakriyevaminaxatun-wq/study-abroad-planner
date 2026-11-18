@@ -1,6 +1,28 @@
 {
-  "_note": "Paid-tier prices in USD per 1 million tokens, copied from the official pages on 2026-11-13. All runs used FREE tiers, so the real cost was 0; these give the cost the same run would have on the paid tier.",
-  "gemini-3.5-flash": {"input": 1.50, "output": 9.00, "source": "https://ai.google.dev/gemini-api/docs/pricing"},
-  "openai/gpt-oss-20b": {"input": 0.075, "output": 0.30, "source": "https://console.groq.com/docs/models"},
-  "qwen/qwen3.8-27b": {"input": 0.80, "output": 4.00, "source": "https://console.groq.com/docs/models (preview model)"}
+  "_note": "Paid-tier prices in USD per 1 million tokens, copied from the official pages on 2026-11-13 (Claude on 2026-11-18). Gemini, gpt-oss and Qwen ran on FREE tiers (real cost 0); Claude ran on paid credits. cost_per_task_usd always uses these paid prices, so all models are compared the same way.",
+  "gemini-3.5-flash": {
+    "input": 1.5,
+    "output": 9.0,
+    "source": "https://ai.google.dev/gemini-api/docs/pricing"
+  },
+  "openai/gpt-oss-20b": {
+    "input": 0.075,
+    "output": 0.3,
+    "source": "https://console.groq.com/docs/models"
+  },
+  "qwen/qwen3.8-27b": {
+    "input": 0.8,
+    "output": 4.0,
+    "source": "https://console.groq.com/docs/models (preview model)"
+  },
+  "claude-sonnet-5-5": {
+    "input": 2.0,
+    "output": 10.0,
+    "source": "https://platform.claude.com/docs/en/about-claude/pricing"
+  },
+  "claude-haiku-5-5": {
+    "input": 0.1,
+    "output": 0.5,
+    "source": "https://platform.claude.com/docs/en/about-claude/pricing (prompts up to 100k tokens)"
+  }
 }

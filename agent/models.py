@@ -115,12 +115,13 @@ class OpenAICompatModel:
         attempt = 0
         while True:
             try:
+                extra = {} if self.temperature is None else {"temperature": self.temperature}
                 return self.client.chat.completions.create(
-                    model=self.name, messages=api_messages, tools=tools, temperature=self.temperature)
+                    model=self.name, messages=api_messages, tools=tools, **extra)
             except Exception as e:
                 body = getattr(getattr(e, "response", None), "text", "") or ""
                 text = f"{e} {body}"
-                if getattr(e, "status_code", None) == 429 and attempt < self.RATE_LIMIT_RETRIES:
+                if getattr(e, "status_code", None) in (429, 503) and attempt < self.RATE_LIMIT_RETRIES:   # rate limit / overloaded
                     attempt += 1
                     m = re.search(r"retry in ([0-9.]+)s", text) or re.search(r'"retryDelay":\s*"([0-9.]+)s"', text)
                     wait = min(float(m.group(1)) + 1 if m else 20.0, self.MAX_WAIT_SECONDS)
@@ -200,11 +201,15 @@ class OpenAICompatModel:
 PROVIDERS = {
     "gemini": {"base_url": "https://generativelanguage.googleapis.com/v1beta/openai/", "key": "GEMINI_API_KEY"},
     "groq":   {"base_url": "https://api.groq.com/openai/v1",                          "key": "GROQ_API_KEY"},
+    # Claude: newer models reject a temperature below 1, so none is sent (the provider default is used)
+    "anthropic": {"base_url": "https://api.anthropic.com/v1/", "key": "ANTHROPIC_API_KEY", "temperature": None},
 }
 MODELS = {   # model id -> (provider, type)
     "gemini-3.5-flash":   ("gemini", "commercial"),
     "openai/gpt-oss-20b": ("groq",   "open-source"),
     "qwen/qwen3.8-27b":   ("groq",   "open-source"),
+    "claude-sonnet-5-5":  ("anthropic", "commercial"),
+    "claude-haiku-5-5":   ("anthropic", "commercial"),
 }
 
 
@@ -231,7 +236,7 @@ def make_model(model_id):
     key = os.environ.get(prov["key"], "").strip()
     if not key:
         raise ValueError(f"{prov['key']} is missing in .env")
-    return OpenAICompatModel(model_id, key, base_url=prov["base_url"])
+    return OpenAICompatModel(model_id, key, base_url=prov["base_url"], temperature=prov.get("temperature", 0.0))
 
 
 def model_from_env():
